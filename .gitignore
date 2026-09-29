@@ -1,0 +1,15 @@
+# IDE and local machine configuration
+**/.idea/
+**/.vscode/
+**/local.properties
+
+# Build outputs and caches
+**/.gradle/
+**/build/
+**/target/
+**/.mvn/wrapper/maven-wrapper.jar
+
+# Environment files and local secrets
+.env
+.env.*
+!.env.example
