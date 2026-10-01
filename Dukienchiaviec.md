@@ -1,206 +1,154 @@
-# KẾ HOẠCH PHÂN CHIA CÔNG VIỆC — DỰ ÁN DRIVERGUARD (MASTER v3.0)
+# KẾ HOẠCH PHÂN CHIA CÔNG VIỆC DỰ ÁN DRIVERGUARD (DEV-02)
 
-## MỤC TIÊU CHIẾN LƯỢC: CHẠY THÔNG LUỒNG TOÀN HỆ THỐNG (END-TO-END) VÀO THỨ 7
+## Nền Tảng Giám Sát An Toàn Tài Xế & Buồng Lái Thông Minh (Connected Fleet IoT & Edge AI)
 
-> **Hạn chót tích hợp (Integration Deadline):** 17:00 Thứ 7  
-> **Tiêu chí nghiệm thu Thứ 7:** Kịch bản "Golden E2E Flow" chạy thông suốt:  
-> `Android Buồng lái (Ngủ gật -> Còi hú ≤ 300ms -> Clip 5s) -> MQTT Broker (EMQX) -> Backend FastAPI (Lưu DB & Bắn SSE) -> Web Dashboard (Bật Popup 5s duyệt) -> Bắn lệnh MQTT -> Android Tài xế (Hiện popup xác nhận dừng nghỉ / khiếu nại) -> Sổ cái Audit Ledger đóng vết bất biến`.
-
----
-
-### 👤 1. Phan Hoàng Vũ — BACKEND CORE ARCHITECT & IOT / REALTIME ENGINE
-
-* **Mục tiêu:** Xây dựng "Trái tim" của hệ thống trên nền tảng **FastAPI (Python)** — Xử lý kết nối telemetry/alert qua MQTT, quản lý CSDL PostgreSQL 16 (Schema v3.0), sinh Pre-signed URL cho clip 5s, điều phối luồng duyệt HITL 2 cấp và lưu Sổ cái kiểm toán WORM bất biến.
-
-#### 1.1. Trách nhiệm kỹ thuật chi tiết
-
-1. **Khởi tạo CSDL PostgreSQL v3.0 (Alembic Migrations):**
-   * Triển khai toàn bộ schema chuẩn hóa theo `DATABASE_DESIGN_DRIVERGUARD.md` bằng SQLAlchemy Models & Alembic:
-     * `account`, `staff`, `vehicle`, `driver`.
-     * `vehicle_log`: Khóa chính `BIGINT GENERATED ALWAYS AS IDENTITY` tối ưu cho 100k xe.
-     * `safety_alert_log`: Lưu trữ sự kiện an toàn, metrics sinh trắc học ($PERCLOS, MAR, Pitch, Yaw$), idempotency key `event_id`, URL clip S3/MinIO.
-     * `hitl_case`: Quản lý trạng thái duyệt 2 cấp (`PENDING_REVIEW`, `CONFIRMED_VIOLATION`, `REJECTED_FALSE_ALARM`, `ACCEPTED_REST`, `DISPUTED_GLARE`).
-     * `safety_audit_ledger`: Trigger WORM cấm `UPDATE`/`DELETE`, băm SHA-256 HMAC chống giả mạo chứng cứ.
-     * `safety_threshold_config`: Bảng lưu ngưỡng động ($EAR, MAR, Pitch, Yaw, Speed, S3 TTL$), tuyệt đối không hard-code theo lệnh Mentor.
-2. **IoT Ingestion & Messaging Gateway (aiomqtt / Paho-MQTT):**
-   * Subscribe các MQTT Topic qua EMQX Broker:
-     * `telemetry/gps/{vehicleId}` (QoS 0): Nhận tọa độ định vị xe.
-     * `safety/alert/{vehicleId}` (QoS 1): Nhận sự kiện vi phạm Cấp 2 và Cấp 3 theo đúng JSON Data Contract (SAD mục 5.2).
-   * Publish lệnh can thiệp tới thiết bị buồng lái:
-     * `command/driver/{driverId}` (QoS 1): Gửi chỉ thị dừng xe nghỉ ngơi khi Manager bấm xác nhận.
-3. **Core Business API & Realtime Dispatch (FastAPI):**
-   * REST API CRUD cấu hình ngưỡng an toàn (`/api/v1/safety-config`).
-   * S3/MinIO Storage Service: API sinh Pre-signed URL PUT để Mobile upload nhanh clip 5s; Pre-signed GET cho Dashboard xem video; Worker dọn dẹp clip tự hủy sau 24h.
-   * Realtime Push Service (SSE / WebSocket): Khi nhận alert Cấp 3 từ MQTT, lập tức push event khẩn cấp xuống Web Dashboard trong $< 500\text{ ms}$.
-   * API tiếp nhận kết quả duyệt của Manager (`POST /api/v1/hitl/review`) -> Ghi nhận `hitl_case` -> Bắn lệnh MQTT xuống Mobile -> Ký số HMAC ghi vào `safety_audit_ledger`.
-
-#### 1.2. Mục tiêu bàn giao để Thông Luồng Thứ 7
-
-* [ ] Backend FastAPI khởi động mượt mà kết nối PostgreSQL và EMQX trên Docker.
-
-* [ ] Migration script Alembic chạy sạch 100% không lỗi.
-* [ ] Handler MQTT lắng nghe topic `safety/alert/+` ghi nhận dữ liệu vào DB và bắn SSE ra ngoài.
-* [ ] Endpoint sinh Pre-signed URL cho Mobile upload clip MP4 và endpoint duyệt HITL hoạt động chuẩn xác.
+> **Nhóm thực hiện:** Team P-136  
+> **Cơ cấu phân vai chuẩn hóa:**
+>
+> - **NGUYỄN CÔNG DUẨN (Team Lead):** Phụ trách **Mobile App (Android Native)** & Quản trị Tiến độ Dự án
+> - **ĐẠT:** Phụ trách **Model AI (Edge AI, On-device Inference & Evaluation Benchmark)**
+> - **PHÙNG QUỐC VIỆT:** Phụ trách **Frontend (Web Admin HITL Dashboard & UI/UX)**
+> - **HOÀNG VŨ:** Phụ trách **Backend Platform (FastAPI / Spring Boot, CSDL, MQTT Broker & DevOps)**
+>
+> **Phiên bản tài liệu:** 3.1 — Master Team Allocation  
+> **Căn cứ tài liệu kỹ thuật:**
+>
+> - [Master PRD v3.0](file:///docs/Debai/DriverGuard_PRD.md) (5 nỗi đau buồng lái, Scope Core MVP & NFRs)
+> - [Architecture SAD v3.0](file:///docs/Debai/DriverGuard_SAD.md) (C4 Model, Kiến trúc MQTT over TLS, Luồng duyệt 2 cấp HITL)
+> - [Database Design v3.0](file:///docs/Debai/DATABASE_DESIGN_DRIVERGUARD.md) (Schema 8 bảng tối ưu, Audit Ledger WORM, Config ngưỡng động)
+> - [Risk Scorecard v3.0](file:///docs/Debai/Risk-score-v2.md) (Công thức $R(t)$, $K_{\text{bối cảnh}}$, 4 vùng màu Xanh/Vàng/Cam/Đỏ)
+> - [Biên bản Mentor Private 2](file:///Mentor_require.md) (Evaluation người Việt, thông luồng thứ Tư, không hard-code ngưỡng)
+> - [Checklist 10 Deliverables AI20K](file:///README.md)
 
 ---
 
-### 👤 2. Nguyễn Công Duẩn — EDGE AI & MOBILE APPLICATION ENGINEER
+## 1. ĐÁNH GIÁ ĐỘ CÂN BẰNG KHỐI LƯỢNG (WORKLOAD BALANCE MATRIX)
 
-* **Mục tiêu:** Xây dựng ứng dụng Android buồng lái chuyên dụng — Nhận diện nguy cơ ngủ gật/mất tập trung tại chỗ $\le 300\text{ ms}$ (Offline-first 100%), cắt video cuốn chiếu 5s trong RAM đẩy lên MinIO/S3, truyền tin MQTT bền bỉ và hiển thị màn hình tương tác Cấp 2 cho tài xế.
-
-#### 2.1. Trách nhiệm kỹ thuật chi tiết
-
-1. **CameraX & On-Device Vision Engine (MediaPipe FaceMesh):**
-   * Tích hợp Google MediaPipe FaceMesh chạy trên GPU/NPU di động (15–20 FPS ổn định).
-   * Trích xuất 468 landmark, tính toán chỉ số sinh trắc thời gian thực: $EAR$ (mắt), $MAR$ (miệng), $Head\ Pitch$ (gục đầu), $Head\ Yaw$ (ngoảnh mặt).
-   * Cài đặt **Cửa sổ trượt 3 giây (Sliding Window 60 frames)** tính $PERCLOS_{3s}$ kết hợp bù trừ vận tốc GPS ($v < 5\text{ km/h}$ giảm nhạy lúc kẹt xe/đèn đỏ; $v \ge 70\text{ km/h}$ nâng mức khẩn cấp).
-2. **Còi hú cứu mạng buồng lái ($\le 300\text{ ms}$):**
-   * Kích hoạt âm thanh còi hú/rung khẩn cấp tức thì trên thiết bị khi chạm ngưỡng Cấp 2 ($Score \ge 70$) và Cấp 3 ($Score \ge 85$).
-   * Nguyên tắc sống còn: Còi hú độc lập 100% offline, tuyệt đối không chờ phản hồi từ máy chủ.
-3. **Circular Video Buffer RAM & Upload Clip 5s:**
-   * Duy trì buffer cuốn chiếu 10s video trong RAM.
-   * Khi chạm sự cố Cấp 3: Trích xuất 5 giây video (2s trước + 3s sau vi phạm) xuất ra file MP4 dung lượng nhẹ ($\approx 1 - 2\text{ MB}$).
-   * Xin Pre-signed URL từ Backend và upload trực tiếp lên MinIO/S3 qua HTTP PUT.
-4. **Giao thức MQTT Client & Xử lý Ngoại tuyến (Durable Outbox):**
-   * MQTT Client kết nối EMQX:
-     * Gửi GPS định kỳ lên `telemetry/gps/{vehicleId}` (QoS 0).
-     * Gửi sự kiện an toàn lên `safety/alert/{vehicleId}` (QoS 1) kèm URL clip S3 đã upload.
-     * Subscribe nhận lệnh can thiệp `command/driver/{driverId}` (QoS 1).
-   * SQLite Room Outbox: Khi mất sóng 4G/GPS đường đèo, lưu sự kiện vào SQLite cục bộ; có mạng tự động đẩy bù theo thứ tự thời gian.
-5. **Giao diện Buồng lái & Tương tác Cấp 2 (Driver Challenge):**
-   * Khi nhận chỉ thị can thiệp từ Quản lý, màn hình bung thông báo to rõ với 2 nút bấm: `[ĐỒNG Ý DỪNG NGHỈ]` hoặc `[KHIẾU NẠI (BỊ CHÓI NẮNG)]`.
-   * Bấm nút -> Gửi gói tin ACK phản hồi lên MQTT topic để Backend cập nhật Sổ cái.
-
-#### 2.2. Mục tiêu bàn giao để Thông Luồng Thứ 7
-
-* [ ] Ứng dụng Android (APK) mở camera trước, nhận diện khuôn mặt, giả lập nhắm mắt $> 1.5\text{s}$ -> Hú còi tại chỗ $< 300\text{ ms}$.
-
-* [ ] Trích xuất được clip 5s và upload thành công lên MinIO qua Pre-signed URL.
-* [ ] Publish được bản tin MQTT `safety/alert` đúng định dạng JSON chuẩn.
-* [ ] Lắng nghe được lệnh từ topic `command/driver/{driverId}` và hiển thị giao diện 2 nút cho tài xế phản hồi.
-
----
-
-### 👤 3. Đỗ Thành Đạt — AI MODELING, DATASET & EVALUATION SPECIALIST
-
-* **Mục tiêu:** Chịu trách nhiệm phần "sống còn" bắt buộc trong Đề bài và phản biện của Hội đồng Mentor — Xây dựng tập dữ liệu tài xế người Việt, tinh chỉnh thuật toán Multimodal Fusion để triệt tiêu báo động giả và lập Báo cáo Khoa học (Evaluation Report v1.0).
-
-#### 3.1. Trách nhiệm kỹ thuật chi tiết
-
-1. **Xây dựng Tập dữ liệu Benchmark Tài xế Người Việt (Vietnamese Driver Dataset):**
-   * Thu thập và gán nhãn thủ công (Ground Truth) tối thiểu 100 – 300 video/ảnh khuôn mặt người Việt trong bối cảnh thực tế buồng lái:
-     * Đặc thù khuôn mặt người Việt: Mắt một mí/mắt híp, người đeo kính cận, kính râm nhẹ.
-     * Điều kiện môi trường: Ban ngày, ban đêm, ngược sáng, ánh nắng rọi xiên gây chói nheo mắt.
-     * Trạng thái hành vi: Lái xe bình thường, ngáp nói chuyện, nheo mắt do chói nắng, ngủ gật thật, gục đầu.
-2. **Khử cảnh báo sai bằng Hợp nhất Đa tín hiệu (Multimodal Feature Fusion):**
-   * Đánh giá baseline mô hình MediaPipe mặc định $\rightarrow$ Đo đạc tỷ lệ báo sai (False Positive).
-   * Tinh chỉnh công thức kết hợp 5 lớp điều kiện (theo SAD mục 13):
-     * *Phân biệt Ngáp thật vs Nói chuyện:* $MAR \ge 0.60$ kết hợp đồng thời $EAR \le 0.18$ trong $> 1.5\text{s}$.
-     * *Phân biệt Gục đầu ngủ vs Nhìn táp-lô:* $Pitch \le -20^\circ$ kết hợp mắt nhắm $EAR < 0.20$.
-     * *Bù trừ góc lệch camera táp-lô:* Tự động căn chỉnh offset $\approx 15^\circ - 25^\circ$ khi điện thoại đặt lệch phải tài xế.
-   * Xuất bộ tham số ngưỡng tối ưu (JSON/Config) để nạp vào Android app của Duẩn và bảng `safety_threshold_config` của Vũ.
-3. **Đo đạc & Lập Báo cáo Đánh giá Mô hình (Evaluation Report v1.0):**
-   * Xây dựng script Python đánh giá tự động:
-     * Tính Ma trận nhầm lẫn (Confusion Matrix: TP, FP, TN, FN).
-     * Đo lường chỉ số sống còn: $Recall \ge 90\%$, $Precision \ge 85\%$, $F_1\text{-score} \ge 0.88$.
-     * Đo tỷ lệ báo sai theo thời gian lái (False Alarm Rate): $FAR \le 1.5\text{ lần / 100 giờ}$.
-   * Soạn thảo tài liệu **Evaluation Report v1.0** (kèm biểu đồ so sánh Baseline vs Optimized Model) sẵn sàng làm minh chứng bảo vệ trước Mentor.
-
-#### 3.2. Mục tiêu bàn giao để Thông Luồng Thứ 7
-
-* [ ] Tập dữ liệu gán nhãn chuẩn hóa (Ground Truth) lưu trữ trên Google Drive / repo.
-
-* [ ] Bộ tham số ngưỡng ($EAR, MAR, Pitch, Yaw, Weights$) đã được kiểm chứng giảm $\ge 80\%$ cảnh báo giả khi chói nắng.
-* [ ] Script Python tự động tính Confusion Matrix & F1-score chạy ra kết quả định lượng cụ thể.
-* [ ] Bản nháp đồ thị Evaluation Report v1.0 để đưa vào báo cáo nghiệm thu.
-
----
-
-### 👤 4. Phùng Quốc Việt — FRONTEND WEB DASHBOARD & DEVOPS / CI-CD
-
-* **Mục tiêu:** Xây dựng Giao diện Điều hành An toàn trực quan (Fleet Safety Dashboard) cho Cán bộ Quản lý (HITL Tier 1) và thiết lập toàn bộ Hạ tầng Docker, EMQX, MinIO, CI/CD Runner VPS đảm bảo hệ thống sẵn sàng thông luồng mượt mà.
-
-#### 4.1. Trách nhiệm kỹ thuật chi tiết
-
-1. **Hạ tầng Container & DevOps (Docker & VPS):**
-   * Thiết lập cụm Docker Compose chuẩn hóa:
-     * `postgres:16`: CSDL quan hệ chính (port 5432).
-     * `emqx:5.x`: MQTT Broker hiệu năng cao (port 1883 / 8883 / 18083 Dashboard).
-     * `minio`: S3-compatible Object Storage lưu video clip 5s (port 9000 / 9001).
-     * `backend-fastapi`: API Server & Ingestion worker (port 8000).
-   * Cấu hình mạng Docker nội bộ kết nối thông suốt giữa các service.
-   * Thiết lập GitHub Actions Workflow tự động lint, test và build Docker container.
-2. **Web Dashboard Quản trị & Điều hành An toàn (React / Next.js):**
-   * Giao diện chuẩn Dark Mode hiện đại, responsive, chuyên nghiệp cho trung tâm giám sát.
-   * **Bản đồ Giám sát Đội xe Realtime (Leaflet / Mapbox):**
-     * Hiển thị vị trí xe theo GPS telemetry nhận từ Backend.
-     * Đổi màu icon trạng thái xe: Xanh (Bình thường), Vàng (Cảnh báo nhẹ), Đỏ (Đang có sự cố nguy hiểm).
-   * **Trung tâm Can thiệp HITL Cấp 1 (Safety Incident Center):**
-     * Lắng nghe sự kiện Realtime qua SSE / WebSocket từ Backend.
-     * Bật **Popup khẩn cấp tức thì (< 1s)** khi có cảnh báo Cấp 3: Phát video 5 giây trích xuất từ MinIO/S3, biểu đồ chỉ số sinh trắc lúc xảy ra ($PERCLOS, EAR, Speed$).
-     * 2 nút hành động cho Quản lý:
-       * `[XÁC NHẬN NGUY HIỂM]` -> Gửi lệnh bắt buộc dừng xe nghỉ ngơi tới buồng lái.
-       * `[BÁC BỎ BÁO SAI]` -> Đánh dấu cảnh báo sai (do chói nắng/rung giật), xóa clip, không trừ điểm tài xế.
-   * **Màn hình Cấu hình Ngưỡng Động (Safety Config):**
-     * Cho phép Quản trị viên thay đổi trực quan các ngưỡng $EAR, MAR, Pitch$, vận tốc kích hoạt, thời gian lưu clip S3 (1 ngày vs 30 ngày) lưu vào DB.
-   * **Màn hình Tra cứu Sổ Cái Kiểm Toán (Audit Ledger):**
-     * Bảng tra cứu lịch sử vi phạm bất biến: hiển thị ID, tài xế, loại sự cố, quyết định Manager, phản hồi tài xế, mã băm chữ ký số HMAC-SHA256.
-
-#### 4.2. Mục tiêu bàn giao để Thông Luồng Thứ 7
-
-* [ ] Toàn bộ hạ tầng Docker Compose (`postgres`, `emqx`, `minio`, `backend`) dựng lên chạy ổn định trên môi trường dev/VPS.
-
-* [ ] Giao diện Web kết nối SSE với Backend, nhận event vi phạm bật popup video 5s trong vòng $< 1\text{s}$.
-* [ ] Bấm nút "Xác nhận vi phạm" gọi API backend thành công, kích hoạt lệnh gửi xuống mobile.
-* [ ] Bản đồ Leaflet load được vị trí xe mẫu và bảng Audit Ledger hiển thị được dữ liệu kiểm toán.
-
----
-
-## 🎯 KỊCH BẢN TỔNG DUYỆT THÔNG LUỒNG (GOLDEN E2E FLOW) — 17:00 THỨ 7
-
-Khi cả 4 thành viên ráp nối, kịch bản demo kiểm thử thông luồng sẽ diễn ra theo đúng quy trình thực tế sau:
+Sơ đồ phân chia mới phân tách độc lập theo 4 tầng kiến trúc chuyên biệt, đảm bảo không chồng chéo trách nhiệm và cân bằng tuyệt đối **~25% effort / thành viên**:
 
 ```
-[1. BUỒNG LÁI (Duẩn + Đạt)]
-  - Duẩn mở App Android trước camera, nhắm mắt quá 1.5 giây.
-  - Còi hú khẩn cấp vang lên tại chỗ trong vòng <= 300 ms (Offline-first cứu mạng).
-  - App cắt 5s video trong RAM, xin Pre-signed URL upload lên MinIO (S3).
-  - App publish gói tin MQTT 'safety/alert/XE_01' (QoS 1 kèm link clip MinIO).
-       │
-       ▼ (Giao thức MQTT Port 1883)
-[2. HẠ TẦNG & BACKEND (Vũ + Việt)]
-  - Broker EMQX nhận tin -> Backend FastAPI Ingestion tiêu thụ bản tin MQTT.
-  - Backend ghi nhận sự kiện vào 'safety_alert_log' và tạo 'hitl_case'.
-  - Backend lập tức bắn sự kiện qua Server-Sent Events (SSE) tới Web Dashboard.
-       │
-       ▼ (Realtime SSE < 500ms)
-[3. WEB DASHBOARD HITL (Việt)]
-  - Màn hình Web của Việt tự động bung Popup cảnh báo đỏ chớp nháy.
-  - Trình duyệt phát mượt clip 5 giây tài xế vừa nhắm mắt từ MinIO.
-  - Việt (vai trò Safety Manager) bấm nút: [XÁC NHẬN NGUY HIỂM - YÊU CẦU NGHỈ 30 PHÚT].
-       │
-       ▼ (HTTP POST /api/v1/hitl/review -> MQTT Publish)
-[4. PHẢN HỒI BUỒNG LÁI (Duẩn + Vũ)]
-  - Backend nhận lệnh duyệt, ghi Sổ cái, publish MQTT 'command/driver/TX_01'.
-  - Điện thoại Android của Duẩn lập tức nhận lệnh, màn hình hiện popup chỉ thị dừng xe kèm 2 nút:
-    [ĐỒNG Ý DỪNG NGHỈ] hoặc [KHIẾU NẠI CHÓI NẮNG].
-  - Duẩn bấm [ĐỒNG Ý DỪNG NGHỈ] -> Bắn ACK qua MQTT.
-  - Web Dashboard chuyển trạng thái "Tài xế đã chấp thuận dừng nghỉ".
-  - Sổ cái 'safety_audit_ledger' lưu lại toàn bộ chuỗi chứng cứ với chữ ký số HMAC-SHA256 bất biến.
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                      MA TRẬN ĐÁNH GIÁ CÂN BẰNG TẢI (WORKLOAD MATRIX)                   │
+├──────────────┬────────────────────────┬─────────────┬──────────────┬───────────────────┤
+│ Thành viên   │ Phân vai & Trọng tâm   │ Độ khó KT   │ Tỷ lệ tải    │ Deliverables AI20K│
+├──────────────┼────────────────────────┼─────────────┼──────────────┼───────────────────┤
+│ DUẨN (Lead)  │ Mobile App (Android)   │ ★★★★☆ (Cao) │ 25% (Chuẩn)  │ #1, #6, #7, #9    │
+│ ĐẠT          │ Model AI & Benchmark   │ ★★★★☆ (Cao) │ 25% (Chuẩn)  │ #1, #10           │
+│ VIỆT         │ Frontend Web Admin UI  │ ★★★☆☆ (Khá) │ 25% (Chuẩn)  │ #1, #2, #8        │
+│ VŨ           │ Backend & DevOps Cloud │ ★★★★☆ (Cao) │ 25% (Chuẩn)  │ #1, #3, #4, #5    │
+└──────────────┴────────────────────────┴─────────────┴──────────────┴───────────────────┘
 ```
 
 ---
 
-## 📋 MA TRẬN PHỐI HỢP KỸ THUẬT & GIAO DIỆN CHUNG (DATA CONTRACT)
+## 2. BẢNG PHÂN CÔNG NHIỆM VỤ CHI TIẾT THEO TỪNG THÀNH VIÊN
 
-Để tránh xung đột khi tích hợp vào Thứ 7, 4 thành viên thống nhất tuyệt đối các giao thức kỹ thuật sau:
+### 👤 1. NGUYỄN CÔNG DUẨN — Team Lead & Mobile Client Lead
+>
+> **Sứ mệnh:** Xây dựng ứng dụng di động buồng lái (Android Native), quản trị luồng cảnh báo cứu mạng tức thì tại chỗ $\le 300\text{ ms}$ (Offline-first), tích hợp mạng MQTT và giữ nhịp tiến độ toàn đội.
 
-| Thành phần | Giao thức / Định dạng | Chi tiết quy ước | Phụ trách chính |
+| Nhóm việc | Hạng mục công việc chi tiết | Thư mục / File sở hữu | Output bàn giao |
 | :--- | :--- | :--- | :--- |
-| **MQTT Broker** | MQTT v5.0 (Port 1883) | EMQX container, cấu hình anonymous/basic auth cho dev | Việt + Vũ |
-| **Topic GPS** | `telemetry/gps/{vehicleId}` | QoS 0, JSON `{lat, lng, speed, timestamp}` gửi 3s/lần | Duẩn $\rightarrow$ Vũ |
-| **Topic Vi phạm** | `safety/alert/{vehicleId}` | QoS 1, JSON `{eventId, driverId, metrics, evidence}` (SAD 5.2) | Duẩn $\rightarrow$ Vũ |
-| **Topic Lệnh lái** | `command/driver/{driverId}` | QoS 1, JSON `{commandId, action: "REQUIRE_REST", reason}` | Vũ $\rightarrow$ Duẩn |
-| **Upload Clip 5s** | HTTP PUT Pre-signed URL | File MP4 H.264 nhẹ ($< 2\text{ MB}$), tự hủy sau 24h trên MinIO | Vũ + Duẩn |
-| **Dashboard Realtime** | Server-Sent Events (SSE) | Endpoint `/api/v1/realtime/alerts` đẩy JSON alert về Web | Vũ $\rightarrow$ Việt |
-| **Ngưỡng mô hình** | JSON Object config | `{ear_threshold: 0.20, mar_threshold: 0.60, perclos_window: 60}` | Đạt $\rightarrow$ Vũ + Duẩn |
+| **Android App Buồng Lái** | • Phát triển ứng dụng Android Native (Java/Kotlin, SDK 26–34).<br>• Cấu hình **CameraX API** thu nhận luồng hình ảnh camera trước tốc độ ổn định 15–20 FPS.<br>• Nhúng pipeline xử lý hình ảnh, tích hợp engine Model AI từ Đạt chuyển sang.<br>• Quản trị vòng đời ứng dụng xe (Foreground Service), chống crash khi chạy nền đường dài. | `mobile/` | App Android khởi động mượt mà, render camera preview 15–20 FPS liên tục. |
+| **Cảnh báo tức thì $\le 300\text{ ms}$** | • Cài đặt cơ chế phát cảnh báo âm thanh và rung đa cấp (Offline-first):<br>  - Vùng Vàng ($R = 30-59$): Rung nhẹ + âm chime nhắc nhở.<br>  - Vùng Cam ($R = 60-79$): Còi hú cabin 75dB.<br>  - Vùng Đỏ ($R = 80-100$): Còi hú cực đại $100\text{ dB}$ kèm giọng nói *"Bác tài buồn ngủ, tấp xe dừng ngay!"*.<br>• Đảm bảo độ trễ từ lúc model phát hiện đến lúc còi hú $\le 300\text{ ms}$. | `mobile/` (Audio & Notification) | Kích hoạt còi hú tức thì trong buồng lái ngay cả khi bật Airplane Mode (ngắt mạng hoàn toàn). |
+| **RAM Video Buffer & Network** | • Duy trì bộ đệm tròn cuốn chiếu (Circular Video Buffer) 10 giây trong RAM.<br>• Khi sự cố Cấp 3 kích hoạt: trích xuất video 5s (2s trước + 3s sau), nén MP4/JPEG và upload lên Cloud qua Pre-signed URL do Backend (Vũ) cấp.<br>• Tích hợp MQTT Client (Paho Android): bắn GPS định kỳ topic `telemetry/gps/{vehicleId}` (QoS 0) và Sự cố an toàn `safety/alert/{vehicleId}` (QoS 1).<br>• Cài đặt SQLite Durable Outbox lưu tạm khi mất sóng 4G, tự động đồng bộ khi có mạng. | `mobile/` (Storage & Network) | Luồng upload clip 5s tự động và đồng bộ ngoại tuyến hoạt động trơn tru. |
+| **Giao diện Tài xế (HITL Cấp 2)** | • Màn hình ca lái: viền màn hình đổi màu động theo vùng rủi ro (Xanh $\rightarrow$ Vàng $\rightarrow$ Cam $\rightarrow$ Đỏ chớp).<br>• Màn hình tiếp nhận lệnh dừng nghỉ từ Manager: hiển thị 2 nút bấm to bản:<br>  - **Chấp thuận dừng nghỉ:** tự động mở bản đồ dẫn đường trạm nghỉ, khóa nhận cuốc 30 phút.<br>  - **Khiếu nại (Dispute):** bấm xác nhận chói nắng/vẫn tỉnh táo để phúc khảo sau ca. | `mobile/` (UI/UX) | Giao diện buồng lái thân thiện, dễ thao tác an toàn khi đang lái xe. |
+| **Quản trị Tiến độ (Lead)** | • Điều phối các mốc check-in, đặc biệt mốc **Check-in Thứ Tư** với Mentor.<br>• Chịu trách nhiệm Deliverable #6 (**Video Demo**) và Deliverable #7 (**Slide Pitch Deck**), phân vai kịch bản thuyết trình bảo vệ luận điểm Roadmap phần cứng. | `presentation/`, `WORKLOG.md` | Bộ slide và video demo buồng lái thuyết phục trước Hội đồng. |
+
+---
+
+### 👤 2. ĐẠT — Model AI & Edge Inference / Evaluation Benchmark Lead
+>
+> **Sứ mệnh:** Chịu trách nhiệm về "trái tim thuật toán" của dự án — mô hình thị giác biên on-device và hoàn thành **bộ chỉ số bắt buộc Evaluation Report trên dữ liệu người Việt** theo chỉ đạo của Mentor.
+
+| Nhóm việc | Hạng mục công việc chi tiết | Thư mục / File sở hữu | Output bàn giao |
+| :--- | :--- | :--- | :--- |
+| **Thị giác Máy tính Biên (Edge AI)** | • Triển khai **Google MediaPipe FaceMesh** chạy tối ưu trên GPU/NPU di động qua TensorFlow Lite C++.<br>• Trích xuất 468 điểm mốc khuôn mặt, tính toán liên tục các chỉ số sinh trắc học:<br>  - $EAR$ (Eye Aspect Ratio): phát hiện nhắm mắt vi ngủ.<br>  - $MAR$ (Mouth Aspect Ratio): phát hiện ngáp sâu $\ge 2.0\text{s}$.<br>  - $Head\ Yaw$ & $Pitch$: đo góc nghiêng/quay đầu (ngoảnh mặt quá $30^\circ$, cúi nhìn điện thoại, gục đầu).<br>• Xây dựng thuật toán bù trừ góc lệch giá đỡ táp-lô (*Taplo Offset Calibration* $15^\circ - 25^\circ$) để tránh nhận diện nhầm khi đặt điện thoại lệch phải. | `src/models/`, `mobile/` (AI Core) | Module trích xuất sinh trắc học chạy ổn định $\ge 15 - 20\text{ FPS}$ với độ trễ thấp. |
+| **Dynamic Risk Engine On-Device** | • Cài đặt thuật toán Cửa sổ trượt 3 giây (60 frames) tính chỉ số $PERCLOS_{3s}$ (% mắt nhắm $> 80\%$).<br>• Lập trình công thức tích lũy rủi ro thời gian thực $R(t)$ theo [Risk-score-v2.md](file:///docs/Debai/Risk-score-v2.md):<br>  $$R(t) = \max\Big(0, \, \min\big(100, \, R(t - 1) + \Delta R_{\text{vi phạm}} \times K_{\text{bối cảnh}} - \Delta R_{\text{hạ nhiệt}}\big)\Big)$$<br>• Tích hợp hệ số $K_{\text{bối cảnh}}$ (vận tốc GPS, khung giờ trưa/đêm, thời gian lái liên tục) và logic hạ nhiệt cooldown (giữ 30s, hạ tự nhiên hoặc reset khi dừng nghỉ). | Thuật toán trong `Risk-score-v2.md` | Engine tính điểm rủi ro chính xác theo từng giây, chống báo động ảo khi kẹt xe. |
+| **Xây dựng Dataset Người Việt** | • Thu thập và gán nhãn thủ công (Ground Truth) bộ dữ liệu tối thiểu **100 – 300 khuôn mặt người Việt** theo yêu cầu bắt buộc của Mentor:<br>  - Ban ngày nắng gắt, chói nắng hắt xiên qua kính lái.<br>  - Ban đêm buồng lái tối, điều kiện ánh sáng yếu.<br>  - Người có mắt một mí, mắt híp tự nhiên (chống false positive).<br>  - Người đeo kính cận, kính râm. | `eval/data/` | Dataset chuẩn người Việt kèm file nhãn chú thích (annotations) chi tiết. |
+| **Evaluation Report Khoa Học (Deliverable #10)** | • Thực nghiệm đo đạc mô hình trước khi tinh chỉnh để lấy chỉ số baseline.<br>• Tinh chỉnh hyperparameter và ngưỡng phát hiện ($EAR, MAR, Yaw$) trên dataset người Việt.<br>• Đo đạc và lập bảng so sánh trước/sau:<br>  - **Precision, Recall, F1-Score** cho từng hành vi vi phạm (mục tiêu F1 $\ge 90\%$).<br>  - Đo đạc tỷ lệ báo động giả (False Positive Rate $\le 1$ lần/30 phút lái xe) theo NFR-05.<br>• Hoàn thiện báo cáo khoa học tại `eval/results/report.md`. | `eval/results/report.md` | Deliverable #10 hoàn tất: Tài liệu đánh giá khoa học chuẩn mực, sẵn sàng phản biện ban giám khảo. |
+
+---
+
+### 👤 3. PHÙNG QUỐC VIỆT — Frontend Lead (Web Admin HITL Dashboard & UI/UX)
+>
+> **Sứ mệnh:** Xây dựng trung tâm điều hành đội xe thời gian thực cho Cán bộ An toàn (Fleet Safety Manager), quy trình duyệt can thiệp 2 cấp (HITL) và tối ưu trải nghiệm người dùng toàn diện.
+
+| Nhóm việc | Hạng mục công việc chi tiết | Thư mục / File sở hữu | Output bàn giao |
+| :--- | :--- | :--- | :--- |
+| **Bản đồ Giám sát Đội xe Realtime** | • Xây dựng Web Dashboard (React / Vite hoặc Next.js + TailwindCSS).<br>• Tích hợp bản đồ số (Leaflet / Mapbox OpenStreetMap) theo dõi vị trí toàn bộ đội xe thời gian thực.<br>• Hiển thị marker xe kèm mã màu động tương ứng 4 vùng rủi ro: Xanh (An toàn), Vàng (Cảnh giác), Cam (Nguy cơ cao), Đỏ (Nguy cấp khẩn cấp).<br>• Bộ lọc thông minh: lọc xe theo vùng rủi ro, theo đội xe hoặc tìm kiếm nhanh theo biển số xe/tên tài xế. | `web/src/components/map/`, `web/src/pages/` | Bản đồ mượt mà, cập nhật trạng thái xe realtime qua kết nối WebSocket/SSE từ backend. |
+| **Quy trình Duyệt Can Thiệp (HITL Cấp 1)** | • **Modal Popup Báo Động Đỏ:** Khi nhận cảnh báo Vùng Đỏ (Cấp 3) từ backend, tự động bung popup kèm chuông cảnh báo khẩn cấp.<br>• **Trình phát Video Clip 5s:** Tích hợp video player phát ngay đoạn clip 5s bằng chứng vi phạm buồng lái từ S3.<br>• **Bảng thông số vi phạm:** Hiển thị tức thời chỉ số $EAR, MAR$, góc quay đầu, vận tốc xe lúc vi phạm, thời gian lái liên tục trong ca.<br>• **Bộ 3 nút hành động cho Manager:**<br>  1. *Xác nhận vi phạm:* Bấm gửi chỉ thị yêu cầu tài xế dừng xe nghỉ ngơi.<br>  2. *Bác bỏ (False Alarm):* Đánh dấu báo động sai (do chói nắng) $\rightarrow$ lệnh hệ thống tự hủy clip và không trừ điểm tài xế.<br>  3. *Hỗ trợ khẩn cấp:* Kích hoạt cảnh báo gọi điện cứu hộ. | `web/src/components/hitl/` | Luồng duyệt can thiệp hoàn tất trong vòng 10 giây, thao tác chuẩn xác. |
+| **Màn hình Cấu hình Ngưỡng Động** | • Xây dựng giao diện **Cấu hình ngưỡng an toàn (`safety_threshold_config`)** theo đúng yêu cầu Mentor (tuyệt đối không hard-code):<br>  - Slider điều chỉnh ngưỡng $EAR$ nhắm mắt (0.18 – 0.25).<br>  - Slider điều chỉnh ngưỡng $MAR$ ngáp (0.60 – 0.80).<br>  - Cấu hình ngưỡng tốc độ cao tốc ($70\text{ km/h}$) và thời gian lưu trữ clip (1 ngày ở MVP, 30–90 ngày ở Production).<br>  - Lưu trực tiếp cấu hình về backend qua REST API. | `web/src/pages/settings/` | Manager có thể tinh chỉnh ngưỡng cảnh báo linh hoạt ngay trên giao diện web. |
+| **Sổ Cái Kiểm Toán & Báo Cáo Nhân Quả** | • Màn hình tra cứu **Sổ cái kiểm toán bất biến (Audit Ledger)** 3–5 năm phục vụ thanh tra pháp lý/bảo hiểm.<br>• Giao diện báo cáo nhân quả (Causal Safety Charts): Biểu đồ tương quan giữa số giờ lái xe liên tục và tỷ lệ xuất hiện vi ngủ buồng lái. | `web/src/pages/reports/` | Báo cáo trực quan, số liệu minh bạch, đáp ứng chuẩn kiểm toán. |
+| **Tài liệu & Hồ sơ Dự án** | • Chịu trách nhiệm Deliverable #2: Chuyển đổi và hoàn thiện [README.md](file:///c:/Users/Phung%20Quoc%20Viet/Desktop/AI_in_Action/Detect_APP/README.md) từ boilerplate thành README chuẩn mực dự án DriverGuard.<br>• Cập nhật và duy trì Deliverable #8: [JOURNAL.md](file:///c:/Users/Phung%20Quoc%20Viet/Desktop/AI_in_Action/Detect_APP/JOURNAL.md) (Nhật ký phát triển kỹ thuật). | `README.md`, `JOURNAL.md` | Bộ tài liệu dự án chuyên nghiệp, đúng nhận diện thương hiệu DriverGuard. |
+
+---
+
+### 👤 4. HOÀNG VŨ — Backend Platform & Cloud DevOps Lead
+>
+> **Sứ mệnh:** Xây dựng hạ tầng dữ liệu và trung tâm dịch vụ kết nối 100.000 xe, tối ưu broker MQTT, triển khai AI Escalation Agent và tự động hóa toàn bộ quy trình DevOps đám mây.
+
+| Nhóm việc | Hạng mục công việc chi tiết | Thư mục / File sở hữu | Output bàn giao |
+| :--- | :--- | :--- | :--- |
+| **Thiết Kế & Cài Đặt CSDL (PostgreSQL 16+)** | • Setup CSDL PostgreSQL 16+ theo bản thiết kế chuẩn [DATABASE_DESIGN_DRIVERGUARD.md](file:///docs/Debai/DATABASE_DESIGN_DRIVERGUARD.md).<br>• Triển khai đầy đủ 8 bảng Core MVP:<br>  - `account`, `staff`, `vehicle`, `driver`<br>  - `vehicle_log` (tối ưu khóa BIGINT, partitioning theo tháng phục vụ 33.000 msg/s)<br>  - `safety_alert_log` (lưu chi tiết $EAR, MAR, Yaw$, điểm rủi ro, S3 key, idempotency qua `event_id`)<br>  - `hitl_case` (quản lý trạng thái duyệt 2 cấp)<br>  - `safety_threshold_config` (lưu các bộ ngưỡng động)<br>• Cài đặt bảng WORM `safety_audit_ledger`: tạo Database Trigger ngăn chặn tuyệt đối lệnh `UPDATE`/`DELETE`, băm chữ ký số HMAC/SHA-256 bảo đảm tính bất biến 3–5 năm. | `src/models/`, `db/migration/` | Schema CSDL hoàn chỉnh 100%, sẵn sàng cho mốc **Check-in Thứ Tư**. |
+| **MQTT Broker & Ingestion Service** | • Cấu hình cụm MQTT Broker (EMQX / Mosquitto over TLS Port 8883) hỗ trợ 100.000 kết nối đồng thời.<br>• Xây dựng Telemetry Ingestion Worker tiêu thụ 2 luồng tin nhắn:<br>  - `telemetry/gps/{vehicleId}`: QoS 0 (chấp nhận drop gói tin khi nghẽn mạng để tiết kiệm RAM)<br>  - `safety/alert/{vehicleId}`: QoS 1 (bắt buộc ACK, đảm bảo không thất lạc sự cố)<br>• Cài đặt logic Idempotency Key lọc trùng lặp khi xe từ vùng mất sóng 4G gửi dồn log về. | `src/services/mqtt.py`, `src/services/ingestion.py` | Pipeline Ingestion vận hành ổn định, tiêu thụ mượt mà dữ liệu giả lập. |
+| **AI Safety Escalation Agent & APIs** | • Xây dựng Safety Escalation Agent bằng LangGraph / FastAPI.<br>• Phân tích rủi ro đa biến: kết hợp điểm $R(t)$, số lần vi phạm trong ca, thời gian lái liên tục và tốc độ GPS $\rightarrow$ gợi ý tự động phương án xử lý cho Manager.<br>• Xây dựng hệ thống REST API chuẩn OpenAPI/Swagger cho Mobile và Web.<br>• Tích hợp WebSocket / SSE Hub đẩy sự cố khẩn cấp tức thì lên Web Admin của Việt.<br>• Cấp Pre-signed URL cho Mobile upload clip 5 giây lên S3/MinIO và tạo Janitor tự hủy clip sau 24h. | `src/agents/`, `src/api/routes.py`, `src/services/` | Agent vận hành chính xác, tài liệu Swagger `/docs` đầy đủ. |
+| **DevOps, Docker & Cloud Deploy (Deliverable #5)** | • Viết `Dockerfile` tối ưu multi-stage, `docker-compose.yml` khởi chạy trọn cụm (Backend, PostgreSQL, EMQX Broker).<br>• Cấu hình GitHub Actions CI chạy kiểm tra `ruff` linting và `pytest` với độ bao phủ unit test $\ge 60\%$.<br>• Triển khai backend lên Cloud (Render / Railway / Fly.io) với domain thật, kết nối HTTPS/WSS công khai (**Live URL** - Deliverable #5). | `Dockerfile`, `docker-compose.yml`, `.github/workflows/` | Deliverable #5 hoàn tất: Hệ thống backend chạy ổn định 24/7 trên môi trường Production. |
+
+---
+
+## 3. MA TRẬN PHỐI HỢP & GIAO TIẾP LIÊN TẦNG (CROSS-LAYER HANDSHAKE)
+
+```
+        ┌────────────────────────────────────────────────────────┐
+        │                  MA TRẬN GIAO THƯƠNG                   │
+        ├──────────────────────┬─────────────────────────────────┤
+        │ Giao diện kết nối    │ Hai thành viên chịu trách nhiệm │
+        ├──────────────────────┼─────────────────────────────────┤
+        │ AI Model ◄──Pipeline──► Mobile │ ĐẠT (AI)   ◄────────► DUẨN (Mobile)│
+        │ Mobile ◄──MQTT/S3──► Backend   │ DUẨN (App) ◄────────► VŨ (Backend) │
+        │ Backend ◄──WS/REST──► Web UI   │ VŨ (BE)    ◄────────► VIỆT (FE)    │
+        │ Web UI ◄──Config/Eval──► AI    │ VIỆT (FE)  ◄────────► ĐẠT (AI)     │
+        │ DevOps ◄──Deploy CI/CD──► Toàn bộ│ VŨ (DevOps)◄────────► CẢ NHÓM   │
+        └──────────────────────┴─────────────────────────────────┘
+```
+
+1. **Giữa Đạt & Duẩn (Model AI $\longleftrightarrow$ Mobile App):**
+   - Đạt đóng gói model MediaPipe FaceMesh & thuật toán $PERCLOS_{3s} / R(t)$ thành thư viện/class gọn gàng; Duẩn nhúng vào Android Native và nối luồng CameraX.
+   - Duẩn hỗ trợ Đạt test thuật toán trực tiếp trên camera điện thoại để thu thập dữ liệu benchmark.
+2. **Giữa Duẩn & Vũ (Mobile App $\longleftrightarrow$ Backend & MQTT):**
+   - Thống nhất payload JSON gói tin `REALTIME_ALERT` gửi qua MQTT QoS 1.
+   - Thống nhất API xin Pre-signed URL để upload video 5 giây lên S3.
+3. **Giữa Vũ & Việt (Backend $\longleftrightarrow$ Web Frontend Admin):**
+   - Vũ thiết lập kênh WebSocket/SSE đẩy sự cố đỏ; Việt bắt sự kiện để kích hoạt popup chuông báo động trên Web.
+   - Vũ cung cấp các REST API cho Manager duyệt vi phạm (`CONFIRMED`, `REJECTED`, `EMERGENCY`) và API cập nhật ngưỡng động.
+4. **Giữa Việt & Đạt (Web Config $\longleftrightarrow$ Model AI Parameters):**
+   - Việt thiết kế giao diện cấu hình ngưỡng động ($EAR, MAR$, thời gian lưu clip); Đạt đảm bảo thuật toán nhận diện tôn trọng các tham số cấu hình này từ database.
+
+---
+
+## 4. TIẾN ĐỘ THỰC HIỆN THEO CÁC MỐC QUAN TRỌNG
+
+```
+Tuần 1 (Hiện tại)                  Thứ Tư (Check-in Mentor)         Cuối Tuần 1 (Pre-MVP)            Tuần 2 (Demo Day)
+──────┬──────────────────────────────────────┬────────────────────────────────┬───────────────────────────►
+      │                                      │                                │
+      ▼                                      ▼                                ▼
+[Setup & Phân rã]                     [THÔNG LUỒNG HỆ THỐNG]           [HOÀN THIỆN CORE FEATURES]       [BENCHMARK & DEMO DAY]
+• Vũ: Setup DB + MQTT Broker          • DB 8 bảng hoạt động            • Duẩn: Mobile còi hú ≤ 300ms    • Đạt: Chốt F1-score ≥ 90%
+• Duẩn: Setup Android CameraX         • Mobile bắn tin MQTT giả lập    • Việt: Web duyệt HITL clip 5s   • Vũ: Chốt Live URL Cloud
+• Đạt: Xây dựng FaceMesh & Dataset    • Web nhận popup cảnh báo        • Vũ: Safety Agent hoàn tất      • Duẩn: Video Demo + Slide
+• Việt: Khung Web + Bản đồ            • Báo cáo tiến độ Mentor         • Tích hợp thông suốt 5 luồng    • Cả nhóm: Tổng duyệt
+```
+
+---
+
+## 5. QUY CHUẨN LÀM VIỆC & KỶ LUẬT ĐỘI NGŨ
+
+1. **Tuân thủ kỷ luật kiến trúc:** Nghiêm cấm tự ý thay đổi cấu trúc CSDL, chuyển đổi giao thức mạng hay thay đổi logic chấm điểm mà không thông báo trong nhóm và xin ý kiến Mentor.
+2. **Duy trì ghi chép AI Log:** Cả 4 thành viên bắt buộc kiểm tra hook ghi log AI (`setup_hooks.ps1` hoặc `setup_hooks.sh`) hoạt động tốt trên máy cá nhân trước khi push code để bảo vệ điểm quá trình.
+3. **Commit theo chuẩn Conventional Commits:**
+   - `feat(mobile): ...` (Duẩn)
+   - `feat(ai): ...` hoặc `eval: ...` (Đạt)
+   - `feat(web): ...` (Việt)
+   - `feat(backend): ...` hoặc `chore(devops): ...` (Vũ)
