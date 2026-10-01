@@ -1,15 +1,63 @@
-# IDE and local machine configuration
-**/.idea/
-**/.vscode/
-**/local.properties
+# Python
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
 
-# Build outputs and caches
-**/.gradle/
-**/build/
-**/target/
-**/.mvn/wrapper/maven-wrapper.jar
+# Virtual environments
+venv/
+.venv/
+env/
 
-# Environment files and local secrets
+# Environment variables
 .env
-.env.*
-!.env.example
+.env.local
+.env.production
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data (never commit large data)
+data/
+*.db
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# Test coverage
+htmlcov/
+.coverage
+coverage.xml
+
+# Docker
+docker-compose.override.yml
+
+# Node (frontend)
+node_modules/
+.next/
+out/
+.nuxt/
+
+# Build
+*.pyc
+*.pyo
+
+# AI logs — tracked structure, ignored content
+.ai-log/*.jsonl
+.ai-log/archive/
+
+# Local workspace / personal notes
+my-folder/
